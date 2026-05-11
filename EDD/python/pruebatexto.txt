@@ -1,0 +1,11 @@
+
+  "Zeta",
+  "Alfa",
+  "Omega",
+  "Beta",
+  "Gamma",
+  "Delta",
+  "Sigma",
+  "Epsilon",
+  "Pi",
+  "Kappa"
