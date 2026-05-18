@@ -1,359 +1,170 @@
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
-import time
+from tkinter import ttk, messagebox
 import random
-import os
-import json
-import pandas as pd
+from busqueda.tablahash import TablaHash
 
-# Importar nuestras librerías modulares
-from interno.ordenacion_interna import (burbuja, insercion, seleccion, 
-                                        shell_sort, quick_sort, heap_sort, radix_sort)
-from externo.ordenacion_externa import (intercalacion_pasos, mezcla_directa_pasos, 
-                                        mezcla_equilibrada_pasos)
-
-# --- TEMAS CONFIGURABLES ---
-TEMAS = {
-    "Cyberpunk": {"bg": "#120136", "bg2": "#035AA6", "bg3": "#40BAD5", "accent": "#FCBF49", "text": "#FFFFFF", "bar": "#035AA6", "bar_active": "#FCBF49", "bar_done": "#40BAD5"},
-    "Nórdico": {"bg": "#2E3440", "bg2": "#3B4252", "bg3": "#434C5E", "accent": "#88C0D0", "text": "#ECEFF4", "bar": "#5E81AC", "bar_active": "#EBCB8B", "bar_done": "#A3BE8C"},
-    "Hacker": {"bg": "#0D0D0D", "bg2": "#1A1A1A", "bg3": "#262626", "accent": "#00FF41", "text": "#00FF41", "bar": "#008F11", "bar_active": "#FFFFFF", "bar_done": "#00FF41"},
-    "Solarizado": {"bg": "#FDF6E3", "bg2": "#EEE8D5", "bg3": "#93A1A1", "accent": "#268BD2", "text": "#657B83", "bar": "#2AA198", "bar_active": "#CB4B16", "bar_done": "#859900"}
-}
-
-FONT_TIT = ("Segoe UI", 16, "bold")
-FONT_BTN = ("Segoe UI", 10, "bold")
-FONT_SM = ("Segoe UI", 9)
-
-class OrdenamientoApp:
+class AppInventarioDidactico:
     def __init__(self, root):
         self.root = root
-        self.root.title("Visualizador de Ordenamiento Dinámico v3.1 - Equipo Integrado")
-        self.root.geometry("1200x850")
+        self.root.title("Visualizador Didáctico de Tabla Hash - Inventario")
+        self.root.geometry("1000x700")
+        self.root.config(padx=10, pady=10)
+
+        # Usamos una capacidad pequeña (11) para forzar colisiones y poder verlas en la GUI
+        self.capacidad_tabla = 11
+        self.inventario = TablaHash(capacidad=self.capacidad_tabla)
+
+        self.crear_interfaz()
+        self.actualizar_vista_tabla()
+
+    def crear_interfaz(self):
+        # --- PANEL IZQUIERDO: Controles ---
+        frame_controles = tk.LabelFrame(self.root, text="Panel de Control", padx=10, pady=10)
+        frame_controles.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
+
+        tk.Label(frame_controles, text="SKU (Ej: SKU01):").pack(anchor=tk.W)
+        self.entry_sku = tk.Entry(frame_controles, width=25)
+        self.entry_sku.pack(pady=(0, 10))
+
+        tk.Label(frame_controles, text="Nombre:").pack(anchor=tk.W)
+        self.entry_nombre = tk.Entry(frame_controles, width=25)
+        self.entry_nombre.pack(pady=(0, 10))
+
+        tk.Button(frame_controles, text="1. Insertar / Actualizar", command=self.insertar_producto, bg="#d9ead3").pack(fill=tk.X, pady=5)
+        tk.Button(frame_controles, text="2. Buscar de forma Didáctica", command=self.buscar_producto, bg="#c9daf8", font=("Arial", 10, "bold")).pack(fill=tk.X, pady=5)
+        tk.Button(frame_controles, text="3. Generar 5 Aleatorios", command=self.generar_masivos, bg="#fce5cd").pack(fill=tk.X, pady=25)
+
+        # --- PANEL DERECHO: Visualización de la Tabla ---
+        frame_tabla = tk.LabelFrame(self.root, text="Estado de la Memoria (Tabla Hash)", padx=10, pady=10)
+        frame_tabla.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+        # Usamos un Text widget para dibujar la tabla
+        self.texto_tabla = tk.Text(frame_tabla, height=20, width=50, state=tk.DISABLED, font=("Courier", 11), bg="#2b2b2b", fg="#a9b7c6")
+        self.texto_tabla.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        scrollbar = tk.Scrollbar(frame_tabla, command=self.texto_tabla.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.texto_tabla.config(yscrollcommand=scrollbar.set)
+
+        # --- PANEL INFERIOR: Consola Didáctica ---
+        frame_consola = tk.LabelFrame(self.root, text="Consola Didáctica (Paso a paso de la búsqueda)", padx=10, pady=10)
+        frame_consola.pack(side=tk.BOTTOM, fill=tk.BOTH, pady=(10, 0))
+
+        self.texto_consola = tk.Text(frame_consola, height=10, state=tk.DISABLED, font=("Arial", 11), bg="#f4f4f4")
+        self.texto_consola.pack(fill=tk.BOTH, expand=True)
+
+    def log_consola(self, mensaje, color="black", limpiar=False):
+        """Escribe mensajes en la consola didáctica de abajo."""
+        self.texto_consola.config(state=tk.NORMAL)
+        if limpiar:
+            self.texto_consola.delete(1.0, tk.END)
         
-        self.tema_actual = "Cyberpunk"
-        self.c = TEMAS[self.tema_actual]
-        self.animando = False
-        self.datos_actuales = []
-        self.metodo_actual = "burbuja"
-        self.tipo_metodo = "interno" 
+        # Configurar colores
+        self.texto_consola.tag_config(color, foreground=color)
+        self.texto_consola.insert(tk.END, mensaje + "\n", color)
         
-        self.widgets_tema = [] 
-        self._build_ui()
-        self._aplicar_tema(self.tema_actual)
-        self._generar_aleatorios()
+        self.texto_consola.see(tk.END)
+        self.texto_consola.config(state=tk.DISABLED)
 
-    def _reg_w(self, widget, t_bg="bg", t_fg="text"):
-        self.widgets_tema.append((widget, t_bg, t_fg))
-        return widget
+    def actualizar_vista_tabla(self, indice_resaltado=None):
+        """Dibuja la tabla hash actual en el panel derecho."""
+        self.texto_tabla.config(state=tk.NORMAL)
+        self.texto_tabla.delete(1.0, tk.END)
+        self.texto_tabla.tag_config("resaltado", background="#4a6b46", foreground="white")
 
-    def _build_ui(self):
-        # --- HEADER ---
-        self.hdr = self._reg_w(tk.Frame(self.root, pady=10))
-        self.hdr.pack(fill="x")
-        self.lbl_main = self._reg_w(tk.Label(self.hdr, text="⬡ ORDENAMIENTO ULTRA ⬡", font=FONT_TIT), "bg", "accent")
-        self.lbl_main.pack()
-
-        body = self._reg_w(tk.Frame(self.root))
-        body.pack(fill="both", expand=True, padx=15, pady=10)
-
-        # --- SIDEBAR IZQUIERDA ---
-        side = self._reg_w(tk.Frame(body, width=320), "bg2")
-        side.pack(side="left", fill="y", padx=(0, 10))
-        side.pack_propagate(False)
-
-        # CONFIGURACIÓN
-        self._reg_w(tk.Label(side, text="⚙️ CONFIGURACIÓN", font=FONT_SM)).pack(pady=(10,5))
-        frame_configs = self._reg_w(tk.Frame(side), "bg2")
-        frame_configs.pack(fill="x", padx=10)
-        
-        self._reg_w(tk.Label(frame_configs, text="Tema:", font=FONT_SM)).grid(row=0, column=0, sticky="w")
-        self.combo_tema = ttk.Combobox(frame_configs, values=list(TEMAS.keys()), state="readonly", width=14)
-        self.combo_tema.set(self.tema_actual)
-        self.combo_tema.bind("<<ComboboxSelected>>", lambda e: self._aplicar_tema(self.combo_tema.get()))
-        self.combo_tema.grid(row=0, column=1, pady=2)
-
-        self._reg_w(tk.Label(frame_configs, text="Vías (K):", font=FONT_SM)).grid(row=1, column=0, sticky="w")
-        self.spin_k = tk.Spinbox(frame_configs, from_=2, to=10, width=5)
-        self.spin_k.delete(0, "end"); self.spin_k.insert(0, "3")
-        self.spin_k.grid(row=1, column=1, sticky="w", pady=2)
-
-        self._reg_w(tk.Label(frame_configs, text="Extraer:", font=FONT_SM)).grid(row=2, column=0, sticky="w")
-        self.combo_tipo_dato = ttk.Combobox(frame_configs, values=["Automático", "Solo Números", "Solo Texto"], state="readonly", width=14)
-        self.combo_tipo_dato.set("Automático")
-        self.combo_tipo_dato.grid(row=2, column=1, pady=2)
-
-        # MÉTODOS
-        self.btn_metodos = {}
-        
-        # Internos
-        self._reg_w(tk.Label(side, text="MÉTODOS INTERNOS", font=FONT_SM)).pack(pady=(15,5))
-        frame_int = self._reg_w(tk.Frame(side), "bg2")
-        frame_int.pack(fill="x", padx=10)
-        
-        metodos_internos = [
-            ("Burbuja", "burbuja"), ("Inserción", "insercion"), ("Selección", "seleccion"), 
-            ("Shell", "shell"), ("Quick", "quick"), ("Heap", "heap"), ("Radix", "radix")
-        ]
-        
-        for i, (label, key) in enumerate(metodos_internos):
-            btn = tk.Button(frame_int, text=label, font=FONT_SM, bd=0, cursor="hand2", command=lambda k=key, t="interno": self._sel_metodo(k, t))
-            btn.grid(row=i//2, column=i%2, sticky="ew", padx=2, pady=2)
-            frame_int.grid_columnconfigure(i%2, weight=1)
-            self.widgets_tema.append((btn, "bg3", "text"))
-            self.btn_metodos[key] = btn
-
-        # Externos
-        self._reg_w(tk.Label(side, text="MÉTODOS EXTERNOS", font=FONT_SM)).pack(pady=(10,5))
-        metodos_externos = [
-            ("Intercalación", "intercalacion"), ("Mezcla Directa", "directa"), ("Mezcla Equilibrada", "equilibrada")
-        ]
-        for label, key in metodos_externos:
-            btn = tk.Button(side, text=label, font=FONT_SM, bd=0, cursor="hand2", command=lambda k=key, t="externo": self._sel_metodo(k, t))
-            btn.pack(fill="x", padx=10, pady=2)
-            self.widgets_tema.append((btn, "bg3", "text"))
-            self.btn_metodos[key] = btn
-
-        # CONTROLES INFERIORES Y ARCHIVOS
-        self._reg_w(tk.Label(side, text="DATOS Y ARCHIVOS", font=FONT_SM)).pack(pady=(10,5))
-        
-        btn_rand = tk.Button(side, text="🎲 Generar Aleatorios", font=FONT_SM, bd=0, cursor="hand2", command=self._generar_aleatorios)
-        btn_rand.pack(fill="x", padx=10, pady=2)
-        self.widgets_tema.append((btn_rand, "bg3", "text"))
-
-        btn_load = tk.Button(side, text="📂 Cargar Archivo", font=FONT_SM, bd=0, cursor="hand2", command=self._cargar_archivo)
-        btn_load.pack(fill="x", padx=10, pady=2)
-        self.widgets_tema.append((btn_load, "bg3", "text"))
-
-        btn_save = tk.Button(side, text="💾 Guardar Resultados", font=FONT_SM, bd=0, cursor="hand2", command=self._guardar_archivo)
-        btn_save.pack(fill="x", padx=10, pady=2)
-        self.widgets_tema.append((btn_save, "bg3", "text"))
-
-        self.vel_slider = tk.Scale(side, from_=0.01, to=1.0, resolution=0.05, orient="horizontal", bd=0, highlightthickness=0)
-        self.vel_slider.set(0.1)
-        self.vel_slider.pack(fill="x", padx=10, pady=(10,5))
-        self.widgets_tema.append((self.vel_slider, "bg2", "text"))
-
-        self.btn_run = tk.Button(side, text="▶️ INICIAR ORDENAMIENTO", font=FONT_BTN, bd=0, pady=10, cursor="hand2", command=self._ejecutar)
-        self.btn_run.pack(fill="x", padx=10, pady=(10, 15))
-        self.widgets_tema.append((self.btn_run, "accent", "bg")) 
-
-        # --- AREA PRINCIPAL ---
-        main = self._reg_w(tk.Frame(body))
-        main.pack(side="left", fill="both", expand=True)
-        
-        self.lbl_titulo = self._reg_w(tk.Label(main, text="Esperando datos...", font=("Consolas", 12, "bold"), anchor="w"), "bg", "accent")
-        self.lbl_titulo.pack(fill="x")
-
-        self.canvas = tk.Canvas(main, height=350, highlightthickness=0)
-        self.canvas.pack(fill="x", pady=5)
-
-        self.log = tk.Text(main, font=("Consolas", 10), bd=0, padx=10, pady=10)
-        self.log.pack(fill="both", expand=True)
-        self.widgets_tema.append((self.log, "bg2", "text"))
-
-    def _aplicar_tema(self, nombre_tema):
-        self.tema_actual = nombre_tema
-        self.c = TEMAS[nombre_tema]
-        self.root.configure(bg=self.c["bg"])
-        self.canvas.configure(bg=self.c["bg2"])
-        
-        for widget, t_bg, t_fg in self.widgets_tema:
-            try:
-                widget.configure(bg=self.c[t_bg], fg=self.c[t_fg])
-                if isinstance(widget, tk.Scale): widget.configure(troughcolor=self.c["bg3"])
-            except: pass
-        self._sel_metodo(self.metodo_actual, self.tipo_metodo) 
-        self._dibujar(self.datos_actuales)
-
-    def _sel_metodo(self, metodo, tipo):
-        self.metodo_actual = metodo
-        self.tipo_metodo = tipo
-        for k, b in self.btn_metodos.items():
-            b.configure(bg=self.c["accent"] if k == metodo else self.c["bg3"], 
-                        fg=self.c["bg"] if k == metodo else self.c["text"])
-        
-        tipo_dato = type(self.datos_actuales[0]).__name__ if self.datos_actuales else "Desconocido"
-        self.lbl_titulo.config(text=f"MODO: {self.metodo_actual.upper()} ({tipo.upper()}) | Datos: {tipo_dato} | Elementos: {len(self.datos_actuales)}")
-
-    def _generar_aleatorios(self):
-        preferencia = self.combo_tipo_dato.get()
-        opcion = "numeros" if preferencia == "Solo Números" else ("texto" if preferencia == "Solo Texto" else random.choice(["numeros", "texto"]))
-
-        if opcion == "numeros":
-            self.datos_actuales = [random.randint(1, 100) for _ in range(20)]
-        else:
-            palabras = ["Python", "Java", "C++", "Ruby", "Rust", "Go", "Perl", "Lua", "Swift", "PHP", "Dart", "Kotlin", "Scala", "R"]
-            self.datos_actuales = [random.choice(palabras) for _ in range(15)]
-        
-        self._log_msg(f"Datos aleatorios generados ({opcion}).")
-        self._sel_metodo(self.metodo_actual, self.tipo_metodo)
-        self._dibujar(self.datos_actuales)
-
-    # LÓGICA DE ARCHIVOS REINCORPORADA
-    def _procesar_y_filtrar_datos(self, raw_data):
-        numeros, textos = [], []
-        for item in raw_data:
-            if pd.isna(item) or item == "": continue
-            try: 
-                numeros.append(float(item) if '.' in str(item) else int(item))
-            except ValueError: 
-                textos.append(str(item).strip())
-        
-        preferencia = self.combo_tipo_dato.get()
-
-        if preferencia == "Solo Números":
-            if not numeros: raise ValueError("Seleccionaste 'Solo Números', pero no se encontró ninguno en el archivo.")
-            self._log_msg(f"Filtro: Extrayendo solo los {len(numeros)} números.")
-            return numeros
-        elif preferencia == "Solo Texto":
-            if not textos: raise ValueError("Seleccionaste 'Solo Texto', pero no se encontraron palabras.")
-            self._log_msg(f"Filtro: Extrayendo solo las {len(textos)} palabras.")
-            return textos
-        else:
-            if len(numeros) >= len(textos) and numeros:
-                self._log_msg(f"Detección Auto: NÚMEROS ({len(numeros)}).")
-                return numeros
-            elif textos:
-                self._log_msg(f"Detección Auto: TEXTO ({len(textos)}).")
-                return textos
-            return []
-
-    def _cargar_archivo(self):
-        ruta = filedialog.askopenfilename(filetypes=[("Archivos Soportados", "*.txt *.xlsx *.xls *.json")])
-        if not ruta: return
-        try:
-            raw = []
-            ext = os.path.splitext(ruta)[1].lower()
-            if ext in ['.xlsx', '.xls']:
-                df = pd.read_excel(ruta, header=None)
-                raw = df.values.flatten().tolist()
-            elif ext == '.json':
-                with open(ruta, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    raw = data if isinstance(data, list) else list(data.values())
-            elif ext == '.txt':
-                with open(ruta, 'r', encoding='utf-8') as f:
-                    for line in f: raw.extend(line.replace(',', ' ').split())
-
-            datos_limpios = self._procesar_y_filtrar_datos(raw)
-            if not datos_limpios: raise ValueError("El archivo está vacío o sin datos válidos.")
+        for i in range(self.capacidad_tabla):
+            linea_texto = f"Índice [{i:02d}]: "
+            actual = self.inventario.tabla[i]
             
-            self.datos_actuales = datos_limpios
-            self._sel_metodo(self.metodo_actual, self.tipo_metodo)
-            self._dibujar(self.datos_actuales)
-            messagebox.showinfo("Éxito", f"Datos cargados desde {os.path.basename(ruta)}")
-        except Exception as e:
-            messagebox.showerror("Error", f"Error al procesar archivo:\n{e}")
-            self._log_msg(f"❌ Error al cargar archivo: {e}")
-
-    def _guardar_archivo(self):
-        if not self.datos_actuales:
-            messagebox.showwarning("Atención", "No hay datos para guardar.")
-            return
-        ruta = filedialog.asksaveasfilename(defaultextension=".txt", filetypes=[("Texto", "*.txt"), ("Excel", "*.xlsx"), ("JSON", "*.json")])
-        if not ruta: return
-        
-        try:
-            ext = os.path.splitext(ruta)[1].lower()
-            if ext == '.json':
-                with open(ruta, 'w', encoding='utf-8') as f: json.dump(self.datos_actuales, f)
-            elif ext == '.xlsx':
-                pd.DataFrame(self.datos_actuales).to_excel(ruta, index=False, header=False)
+            if not actual:
+                linea_texto += "Vacío"
             else:
-                with open(ruta, 'w', encoding='utf-8') as f: f.write(", ".join(map(str, self.datos_actuales)))
-            self._log_msg(f"Archivo guardado en: {ruta}")
-            messagebox.showinfo("Guardado", "Resultados exportados con éxito.")
-        except Exception as e:
-            messagebox.showerror("Error", f"Error al guardar:\n{e}")
+                nodos = []
+                while actual:
+                    nodos.append(f"[{actual.clave}]")
+                    actual = actual.siguiente
+                linea_texto += " -> ".join(nodos)
+            
+            # Insertar línea por línea para poder resaltar el índice buscado
+            if indice_resaltado == i:
+                self.texto_tabla.insert(tk.END, linea_texto + "\n", "resaltado")
+            else:
+                self.texto_tabla.insert(tk.END, linea_texto + "\n")
 
-    def _dibujar(self, valores, activos=[], listos=[]):
-        self.canvas.delete("all")
-        if not valores: return
-        W, H = int(self.canvas.winfo_width() or 800), int(self.canvas.winfo_height() or 350)
-        n = len(valores)
-        ancho = min((W - 40) / n, 80) 
-        valores_unicos = sorted(list(set(valores)))
+        self.texto_tabla.config(state=tk.DISABLED)
+
+    def insertar_producto(self):
+        sku = self.entry_sku.get().upper().strip()
+        nombre = self.entry_nombre.get().strip()
         
-        for i, v in enumerate(valores):
-            rank = valores_unicos.index(v) + 1
-            h = (rank / len(valores_unicos)) * (H - 60) if valores_unicos else 100
-            x1, y1 = 20 + i * ancho, H - 30 - h
-            x2, y2 = x1 + ancho - 2, H - 30
+        if not sku or not nombre:
+            messagebox.showwarning("Advertencia", "Llena SKU y Nombre.")
+            return
             
-            color = self.c["bar_done"] if i in listos else (self.c["bar_active"] if i in activos else self.c["bar"])
-            self.canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline="")
-            
-            text_disp = str(v)
-            if len(text_disp) > 8: text_disp = text_disp[:6]+".."
-            self.canvas.create_text(x1 + ancho/2, y1 - 15, text=text_disp, fill=self.c["text"], font=("Consolas", 8), angle=0 if type(v) != str else 45)
+        precio = round(random.uniform(10, 100), 2) # Precio autogenerado
+        stock = random.randint(1, 50)              # Stock autogenerado
 
-    def _log_msg(self, msg):
-        self.log.insert(tk.END, f"[{time.strftime('%H:%M:%S')}] {msg}\n")
-        self.log.see(tk.END)
-
-    def _ejecutar(self):
-        if self.animando or not self.datos_actuales: return
-        self.animando = True
-        delay = self.vel_slider.get()
-        m = self.metodo_actual
-        self.log.delete("1.0", tk.END)
+        self.inventario.insertar(sku, {"nombre": nombre, "precio": precio, "stock": stock})
+        self.actualizar_vista_tabla()
         
-        try:
-            # Ejecución de MÉTODOS INTERNOS
-            if self.tipo_metodo == "interno":
-                dic_internos = {
-                    "burbuja": burbuja, "insercion": insercion, "seleccion": seleccion,
-                    "shell": shell_sort, "quick": quick_sort, "heap": heap_sort, "radix": radix_sort
-                }
-                
-                if m == "radix" and type(self.datos_actuales[0]) == str:
-                    self._log_msg("❌ Radix Sort no soporta strings directamente en esta implementación.")
-                else:
-                    self._log_msg(f"Iniciando {m.capitalize()} Sort...")
-                    res, pasos = dic_internos[m](self.datos_actuales)
-                    for p in pasos:
-                        self._dibujar(p)
-                        self.root.update(); time.sleep(delay)
-                    self.datos_actuales = res
+        self.entry_sku.delete(0, tk.END)
+        self.entry_nombre.delete(0, tk.END)
+        self.log_consola(f"✅ Se insertó {sku} ({nombre}) en la tabla.", "blue", limpiar=True)
 
-            # Ejecución de MÉTODOS EXTERNOS
-            elif self.tipo_metodo == "externo":
-                if m == "intercalacion":
-                    mitad = len(self.datos_actuales) // 2
-                    a, b = self.datos_actuales[:mitad], self.datos_actuales[mitad:]
-                    self._log_msg(f"Intercalando 2 sublistas (tamaños {len(a)} y {len(b)})...")
-                    res, pasos = intercalacion_pasos(a, b)
-                    for p in pasos:
-                        self._dibujar(a + b, activos=[p[2], len(a)+p[3]])
-                        self.root.update(); time.sleep(delay)
-                    self.datos_actuales = res
-                
-                elif m == "directa":
-                    self._log_msg("Iniciando Mezcla Directa...")
-                    res, pasos = mezcla_directa_pasos(self.datos_actuales)
-                    for p in pasos:
-                        self._dibujar(p)
-                        self.root.update(); time.sleep(delay)
-                    self.datos_actuales = res
+    def generar_masivos(self):
+        for _ in range(5):
+            sku = f"SKU{random.randint(10, 99)}"
+            nombre = f"Producto_{random.randint(100, 999)}"
+            self.inventario.insertar(sku, {"nombre": nombre, "precio": 0, "stock": 0})
+        
+        self.actualizar_vista_tabla()
+        self.log_consola("🎲 Se generaron e insertaron 5 productos aleatorios.", "blue", limpiar=True)
 
-                elif m == "equilibrada":
-                    k_val = int(self.spin_k.get())
-                    self._log_msg(f"Iniciando Mezcla Equilibrada (K={k_val})...")
-                    res, pasos = mezcla_equilibrada_pasos(self.datos_actuales, k=k_val)
-                    for p in pasos:
-                        self._dibujar(p[1])
-                        self.root.update(); time.sleep(delay)
-                    self.datos_actuales = res
+    def buscar_producto(self):
+        """Esta es la función estrella: Simula paso a paso la búsqueda para que el usuario aprenda."""
+        sku = self.entry_sku.get().upper().strip()
+        if not sku:
+            messagebox.showwarning("Advertencia", "Ingresa un SKU para buscar.")
+            return
 
-            self._dibujar(self.datos_actuales, listos=list(range(len(self.datos_actuales))))
-            self._log_msg("✅ ¡Ordenamiento finalizado!")
+        self.log_consola(f"--- INICIANDO BÚSQUEDA DE '{sku}' ---", "black", limpiar=True)
+
+        # PASO 1: Calcular la función Hash
+        indice = self.inventario._funcion_hash_modulo(sku)
+        self.log_consola(f"PASO 1: Aplicando función Hash a '{sku}'...", "black")
+        self.log_consola(f"        Sumando valores ASCII y calculando módulo {self.capacidad_tabla}.", "black")
+        self.log_consola(f"        Resultado matemático -> El elemento debe estar en el Índice [{indice}].", "blue")
+
+        # PASO 2: Resaltar en la GUI el salto directo en memoria O(1)
+        self.actualizar_vista_tabla(indice_resaltado=indice)
+        self.log_consola(f"\nPASO 2: Saltando directamente a la posición [{indice}] de la memoria... (¡Tiempo O(1)!)", "black")
+
+        # PASO 3: Recorrer la lista enlazada (Manejo de colisiones)
+        actual = self.inventario.tabla[indice]
+        pasos = 1
+
+        if actual is None:
+             self.log_consola(f"PASO 3: El Índice [{indice}] está vacío. \n❌ CONCLUSIÓN: El producto '{sku}' NO existe en el sistema.", "red")
+             return
+
+        self.log_consola(f"PASO 3: Hay elementos en el Índice [{indice}]. Iniciando recorrido de la lista enlazada:", "black")
+        
+        while actual:
+            self.log_consola(f"   -> Verificando Nodo {pasos}: ¿'{actual.clave}' es igual a '{sku}'?", "black")
             
-        except Exception as e:
-            self._log_msg(f"❌ Error durante ejecución: {e}")
-        finally:
-            self.animando = False
+            if actual.clave == sku:
+                self.log_consola(f"      ¡SÍ COINCIDEN! 🎉", "green")
+                self.log_consola(f"\n✅ RESULTADO FINAL: Producto encontrado -> Nombre: {actual.valor['nombre']}", "green")
+                return
+            else:
+                self.log_consola(f"      No coinciden. (Esto es una colisión superada). Pasando al siguiente nodo...", "orange")
+            
+            actual = actual.siguiente
+            pasos += 1
+
+        self.log_consola(f"\n❌ CONCLUSIÓN: Llegamos al final de la lista en el Índice [{indice}]. El producto '{sku}' NO existe.", "red")
 
 if __name__ == "__main__":
     root = tk.Tk()
-    app = OrdenamientoApp(root)
+    app = AppInventarioDidactico(root)
     root.mainloop()
